@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+**/node_modules
+web/dist
+web/*.tsbuildinfo
+*.log
+*.exe
+*.test
+docs/screenshots
+tic demo and dashboard*
+
