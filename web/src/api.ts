@@ -1,3 +1,5 @@
+import { zhCN } from './locales/zh-CN'
+
 export type Health = {
   status: string
   service: string
@@ -98,9 +100,9 @@ async function request<T>(base: string, path: string, init?: RequestInit, timeou
   } catch (error) {
     if (error instanceof APIError) throw error
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new APIError('The request timed out before the server responded.', 'request_timeout')
+      throw new APIError(zhCN.errors.requestTimedOut, 'request_timeout')
     }
-    throw new APIError('Unable to reach the service. Check that the local processes are running.', 'backend_unavailable')
+    throw new APIError(zhCN.errors.serviceUnavailable, 'backend_unavailable')
   } finally {
     window.clearTimeout(timeout)
   }
@@ -121,6 +123,6 @@ export const api = {
   diagnose: () => request<Diagnosis>(GOPILOT_API_BASE, '/api/diagnoses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question: 'Diagnose the current Go service problem using runtime evidence.' }),
+    body: JSON.stringify({ question: zhCN.diagnosisQuestion }),
   }, 180_000),
 }
