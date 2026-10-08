@@ -1,0 +1,1037 @@
+{
+  "schema_version": 1,
+  "mode": "historical_replay",
+  "case_id": "goroutine-leak-deepseek-2026-10-08",
+  "case_name": "25 个永久阻塞 Goroutine 泄漏",
+  "recorded_at": "2026-10-08T08:22:50.985812205Z",
+  "provider": {
+    "name": "DeepSeek",
+    "model": "deepseek-flash",
+    "protocol": "OpenAI-compatible Chat Completions"
+  },
+  "provenance": {
+    "source": "real_provider_run",
+    "scenario": "在可信故障前采样后注入 25 个受控 Goroutine，并由真实 DeepSeek Agent 调用 GoPilot 证据工具完成诊断。",
+    "verification": "时间线顺序、submit_diagnosis evidence_refs、服务器生成 observation_id 与物化 Evidence 已在保存前核对。",
+    "redactions": [
+      "LLM API 凭据未记录。"
+    ]
+  },
+  "diagnosis": {
+    "id": "diag_1791447770985_000002",
+    "investigation_id": "inv_1791447764276_000001",
+    "generated_at": "2026-10-08T08:22:50.985812205Z",
+    "summary": "服务 demo-service 当前对外健康（health_status=ok、http_status=200、request_latency_ms 约 0.3ms），但存在一处确定性的 goroutine 泄漏：goroutine 总数从 5 阶跃到 30 并保持不降，pprof 显示其中 25 个 goroutine 全部阻塞在 gopilot/internal/demo.(*LeakController).waitForever，属于刻意注入的泄漏（active_intentional_leak_count=25）。当前尚未造成延迟或可用性劣化，风险在于持续累积。",
+    "root_cause": "gopilot/internal/demo.(*LeakController).Inject 启动了 25 个 goroutine，这些 goroutine 进入 (*LeakController).waitForever 后永久阻塞在 channel receive（state=chan receive），没有任何退出路径，因此无法被回收。证据链一致：get_service_status 报告 current_goroutine_count=30 且 active_intentional_leak_count=25；get_runtime_metrics 显示 goroutines 在约 uptime 38s 处从 5 直接跃迁到 30，start=5、end=30、absolute_delta=25，之后保持平坦不回落；get_goroutine_profile 中签名 3f067bf74dca7430 的 stack group 计数恰好为 25，帧为 [\"gopilot/internal/demo.(*LeakController).waitForever\",\"created by gopilot/internal/demo.(*LeakController).Inject\"]，contains_intentional_leak=true。其余 stack group（pprof 处理、net/http Accept、connReader backgroundRead、os/signal.loop、main.main）各 1 个，属于正常运行时与请求处理活动，20 个 goroutine 的总增量与正常活动无关。此外 heap_alloc_bytes 在同一窗口内从 670632 升至 1902400，其中最后一次采样跳升明显，属于该泄漏路径相关的分配增长而非 goroutine 之外的新问题信号。",
+    "evidence": [
+      {
+        "observation_id": "obs_1791447765130_000001",
+        "source_tool": "get_service_status",
+        "captured_at": "2026-10-08T08:22:45.130599131Z",
+        "description": "Service demo-service reported health ok with 30 goroutines and 25 active intentional leaks.",
+        "data": {
+          "service_identity": "demo-service",
+          "health_status": "ok",
+          "http_status": 200,
+          "request_latency_ms": 0.294,
+          "uptime_ms": 47867,
+          "current_goroutine_count": 30,
+          "active_intentional_leak_count": 25,
+          "service_started_at": "2026-10-08T08:21:57.262342011Z"
+        }
+      },
+      {
+        "observation_id": "obs_1791447765130_000002",
+        "source_tool": "get_runtime_metrics",
+        "captured_at": "2026-10-08T08:22:45.130672703Z",
+        "description": "Goroutine count changed from 5 to 30 over 44.999 seconds (delta +25).",
+        "data": {
+          "samples": [
+            {
+              "timestamp": "2026-10-08T08:21:59.371480914Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 548192,
+              "heap_objects": 882,
+              "uptime_ms": 2109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:00.372413964Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 556032,
+              "heap_objects": 997,
+              "uptime_ms": 3110
+            },
+            {
+              "timestamp": "2026-10-08T08:22:01.37165849Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 577072,
+              "heap_objects": 1097,
+              "uptime_ms": 4109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:02.3711952Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 580552,
+              "heap_objects": 1134,
+              "uptime_ms": 5108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:03.372119981Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 596400,
+              "heap_objects": 1218,
+              "uptime_ms": 6109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:04.371640007Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 599008,
+              "heap_objects": 1245,
+              "uptime_ms": 7109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:05.371693561Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 605800,
+              "heap_objects": 1323,
+              "uptime_ms": 8109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:06.371181201Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 608392,
+              "heap_objects": 1349,
+              "uptime_ms": 9108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:07.371752334Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 624256,
+              "heap_objects": 1434,
+              "uptime_ms": 10109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:08.371530486Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 626848,
+              "heap_objects": 1460,
+              "uptime_ms": 11109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:09.371824228Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 634984,
+              "heap_objects": 1543,
+              "uptime_ms": 12109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:10.371990433Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 641952,
+              "heap_objects": 1624,
+              "uptime_ms": 13109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:11.371877677Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 649272,
+              "heap_objects": 1708,
+              "uptime_ms": 14109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:12.371143595Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 651864,
+              "heap_objects": 1734,
+              "uptime_ms": 15108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:13.371660309Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 658656,
+              "heap_objects": 1812,
+              "uptime_ms": 16109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:14.372109761Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 661248,
+              "heap_objects": 1838,
+              "uptime_ms": 17109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:15.371574251Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 663840,
+              "heap_objects": 1864,
+              "uptime_ms": 18109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:16.372024546Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 670632,
+              "heap_objects": 1942,
+              "uptime_ms": 19109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:17.371794602Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 673224,
+              "heap_objects": 1968,
+              "uptime_ms": 20109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:18.371773082Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 680016,
+              "heap_objects": 2046,
+              "uptime_ms": 21109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:19.371356031Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 682608,
+              "heap_objects": 2072,
+              "uptime_ms": 22109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:20.371321618Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 689400,
+              "heap_objects": 2150,
+              "uptime_ms": 23108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:21.3717911Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 691992,
+              "heap_objects": 2176,
+              "uptime_ms": 24109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:22.371162057Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 698704,
+              "heap_objects": 2253,
+              "uptime_ms": 25108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:23.371669048Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 701296,
+              "heap_objects": 2279,
+              "uptime_ms": 26109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:24.37167593Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 708088,
+              "heap_objects": 2357,
+              "uptime_ms": 27109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:25.371254918Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 710680,
+              "heap_objects": 2383,
+              "uptime_ms": 28108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:26.371839971Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 717920,
+              "heap_objects": 2462,
+              "uptime_ms": 29109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:27.371578183Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 720512,
+              "heap_objects": 2488,
+              "uptime_ms": 30109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:28.371623972Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 727304,
+              "heap_objects": 2566,
+              "uptime_ms": 31109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:29.371189071Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 729896,
+              "heap_objects": 2592,
+              "uptime_ms": 32108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:30.371453631Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 736688,
+              "heap_objects": 2670,
+              "uptime_ms": 33109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:31.370816435Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 746760,
+              "heap_objects": 2796,
+              "uptime_ms": 34108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:32.370829447Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 754096,
+              "heap_objects": 2876,
+              "uptime_ms": 35108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:33.370350825Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 756688,
+              "heap_objects": 2902,
+              "uptime_ms": 36108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:34.37072774Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 763832,
+              "heap_objects": 2984,
+              "uptime_ms": 37108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:35.370206166Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 766424,
+              "heap_objects": 3010,
+              "uptime_ms": 38107
+            },
+            {
+              "timestamp": "2026-10-08T08:22:36.370454753Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 797672,
+              "heap_objects": 3279,
+              "uptime_ms": 39108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:37.37099946Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 800264,
+              "heap_objects": 3305,
+              "uptime_ms": 40108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:38.370371153Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 807216,
+              "heap_objects": 3384,
+              "uptime_ms": 41108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:39.370861015Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 809808,
+              "heap_objects": 3410,
+              "uptime_ms": 42108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:40.370498349Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 816696,
+              "heap_objects": 3489,
+              "uptime_ms": 43108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:41.370323074Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 819288,
+              "heap_objects": 3515,
+              "uptime_ms": 44107
+            },
+            {
+              "timestamp": "2026-10-08T08:22:42.370988352Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 826080,
+              "heap_objects": 3593,
+              "uptime_ms": 45108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:43.370547485Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 828672,
+              "heap_objects": 3619,
+              "uptime_ms": 46108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:44.370450645Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 839360,
+              "heap_objects": 3744,
+              "uptime_ms": 47108
+            }
+          ],
+          "sample_count": 46,
+          "goroutines": {
+            "start": 5,
+            "end": 30,
+            "minimum": 5,
+            "maximum": 30,
+            "absolute_delta": 25,
+            "growth_rate_per_second": 0.556
+          },
+          "heap": {
+            "start_alloc_bytes": 548192,
+            "end_alloc_bytes": 839360,
+            "delta_alloc_bytes": 291168,
+            "start_objects": 882,
+            "end_objects": 3744,
+            "delta_objects": 2862
+          },
+          "capture_window": {
+            "requested_start": "2026-10-08T08:21:45.130668732Z",
+            "actual_start": "2026-10-08T08:21:59.371480914Z",
+            "actual_end": "2026-10-08T08:22:44.370450645Z",
+            "requested_seconds": 60,
+            "actual_seconds": 44.999
+          },
+          "insufficient_history": true,
+          "insufficient_history_reason": "collector does not yet cover the full requested window",
+          "collection": {
+            "last_attempt": "2026-10-08T08:22:44.369812482Z",
+            "last_success": "2026-10-08T08:22:44.370450645Z",
+            "stored_samples": 46,
+            "capacity": 300
+          }
+        }
+      },
+      {
+        "observation_id": "obs_1791447765131_000003",
+        "source_tool": "get_goroutine_profile",
+        "captured_at": "2026-10-08T08:22:45.131226641Z",
+        "description": "25 goroutines shared the stack containing gopilot/internal/demo.(*LeakController).waitForever and were in state chan receive.",
+        "data": {
+          "total_goroutine_count": 30,
+          "stack_groups": [
+            {
+              "signature": "3f067bf74dca7430",
+              "count": 25,
+              "state": "chan receive",
+              "frames": [
+                "gopilot/internal/demo.(*LeakController).waitForever",
+                "created by gopilot/internal/demo.(*LeakController).Inject"
+              ],
+              "contains_intentional_leak": true
+            },
+            {
+              "signature": "18e5e385f7280efd",
+              "count": 1,
+              "state": "running",
+              "frames": [
+                "runtime/pprof.writeGoroutineStacks",
+                "runtime/pprof.writeGoroutine",
+                "runtime/pprof.(*Profile).WriteTo",
+                "net/http/pprof.handler.ServeHTTP",
+                "net/http.(*ServeMux).ServeHTTP",
+                "gopilot/internal/demo.NewServer.withCORS.func1",
+                "net/http.HandlerFunc.ServeHTTP",
+                "net/http.serverHandler.ServeHTTP",
+                "net/http.(*conn).serve",
+                "created by net/http.(*Server).Serve"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "5422c9551ea3c43a",
+              "count": 1,
+              "state": "syscall",
+              "frames": [
+                "os/signal.signal_recv",
+                "os/signal.loop",
+                "created by os/signal.Notify.func1.1"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "7be13483021b2bee",
+              "count": 1,
+              "state": "chan receive",
+              "frames": [
+                "main.main"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "8f8131f06a250398",
+              "count": 1,
+              "state": "runnable",
+              "frames": [
+                "syscall.Syscall",
+                "syscall.read",
+                "syscall.Read",
+                "internal/poll.ignoringEINTRIO",
+                "internal/poll.(*FD).Read",
+                "net.(*netFD).Read",
+                "net.(*conn).Read",
+                "net/http.(*connReader).backgroundRead",
+                "created by net/http.(*connReader).startBackgroundRead"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "bdcefe2b6f3ea65d",
+              "count": 1,
+              "state": "IO wait",
+              "frames": [
+                "internal/poll.runtime_pollWait",
+                "internal/poll.(*pollDesc).wait",
+                "internal/poll.(*pollDesc).waitRead",
+                "internal/poll.(*FD).Accept",
+                "net.(*netFD).accept",
+                "net.(*TCPListener).accept",
+                "net.(*TCPListener).Accept",
+                "net/http.(*Server).Serve",
+                "net/http.(*Server).ListenAndServe",
+                "main.main.func1",
+                "created by main.main"
+              ],
+              "contains_intentional_leak": false
+            }
+          ],
+          "request_latency_ms": 0.371,
+          "truncation": {
+            "input_truncated": false,
+            "groups_truncated": false,
+            "raw_bytes": 10069,
+            "raw_limit_bytes": 2097152,
+            "total_groups": 6,
+            "returned_groups": 6,
+            "frames_per_group_limit": 32
+          }
+        }
+      },
+      {
+        "observation_id": "obs_1791447766250_000004",
+        "source_tool": "get_goroutine_profile",
+        "captured_at": "2026-10-08T08:22:46.250286391Z",
+        "description": "25 goroutines shared the stack containing gopilot/internal/demo.(*LeakController).waitForever and were in state chan receive.",
+        "data": {
+          "total_goroutine_count": 30,
+          "stack_groups": [
+            {
+              "signature": "3f067bf74dca7430",
+              "count": 25,
+              "state": "chan receive",
+              "frames": [
+                "gopilot/internal/demo.(*LeakController).waitForever",
+                "created by gopilot/internal/demo.(*LeakController).Inject"
+              ],
+              "contains_intentional_leak": true
+            },
+            {
+              "signature": "18e5e385f7280efd",
+              "count": 1,
+              "state": "running",
+              "frames": [
+                "runtime/pprof.writeGoroutineStacks",
+                "runtime/pprof.writeGoroutine",
+                "runtime/pprof.(*Profile).WriteTo",
+                "net/http/pprof.handler.ServeHTTP",
+                "net/http.(*ServeMux).ServeHTTP",
+                "gopilot/internal/demo.NewServer.withCORS.func1",
+                "net/http.HandlerFunc.ServeHTTP",
+                "net/http.serverHandler.ServeHTTP",
+                "net/http.(*conn).serve",
+                "created by net/http.(*Server).Serve"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "5422c9551ea3c43a",
+              "count": 1,
+              "state": "syscall",
+              "frames": [
+                "os/signal.signal_recv",
+                "os/signal.loop",
+                "created by os/signal.Notify.func1.1"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "7be13483021b2bee",
+              "count": 1,
+              "state": "chan receive",
+              "frames": [
+                "main.main"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "8f8131f06a250398",
+              "count": 1,
+              "state": "runnable",
+              "frames": [
+                "syscall.Syscall",
+                "syscall.read",
+                "syscall.Read",
+                "internal/poll.ignoringEINTRIO",
+                "internal/poll.(*FD).Read",
+                "net.(*netFD).Read",
+                "net.(*conn).Read",
+                "net/http.(*connReader).backgroundRead",
+                "created by net/http.(*connReader).startBackgroundRead"
+              ],
+              "contains_intentional_leak": false
+            },
+            {
+              "signature": "bdcefe2b6f3ea65d",
+              "count": 1,
+              "state": "IO wait",
+              "frames": [
+                "internal/poll.runtime_pollWait",
+                "internal/poll.(*pollDesc).wait",
+                "internal/poll.(*pollDesc).waitRead",
+                "internal/poll.(*FD).Accept",
+                "net.(*netFD).accept",
+                "net.(*TCPListener).accept",
+                "net.(*TCPListener).Accept",
+                "net/http.(*Server).Serve",
+                "net/http.(*Server).ListenAndServe",
+                "main.main.func1",
+                "created by main.main"
+              ],
+              "contains_intentional_leak": false
+            }
+          ],
+          "request_latency_ms": 0.472,
+          "truncation": {
+            "input_truncated": false,
+            "groups_truncated": false,
+            "raw_bytes": 10079,
+            "raw_limit_bytes": 2097152,
+            "total_groups": 6,
+            "returned_groups": 6,
+            "frames_per_group_limit": 32
+          }
+        }
+      },
+      {
+        "observation_id": "obs_1791447766250_000005",
+        "source_tool": "get_runtime_metrics",
+        "captured_at": "2026-10-08T08:22:46.250336653Z",
+        "description": "Goroutine count changed from 5 to 30 over 28.999 seconds (delta +25).",
+        "data": {
+          "samples": [
+            {
+              "timestamp": "2026-10-08T08:22:16.372024546Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 670632,
+              "heap_objects": 1942,
+              "uptime_ms": 19109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:17.371794602Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 673224,
+              "heap_objects": 1968,
+              "uptime_ms": 20109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:18.371773082Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 680016,
+              "heap_objects": 2046,
+              "uptime_ms": 21109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:19.371356031Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 682608,
+              "heap_objects": 2072,
+              "uptime_ms": 22109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:20.371321618Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 689400,
+              "heap_objects": 2150,
+              "uptime_ms": 23108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:21.3717911Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 691992,
+              "heap_objects": 2176,
+              "uptime_ms": 24109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:22.371162057Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 698704,
+              "heap_objects": 2253,
+              "uptime_ms": 25108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:23.371669048Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 701296,
+              "heap_objects": 2279,
+              "uptime_ms": 26109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:24.37167593Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 708088,
+              "heap_objects": 2357,
+              "uptime_ms": 27109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:25.371254918Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 710680,
+              "heap_objects": 2383,
+              "uptime_ms": 28108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:26.371839971Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 717920,
+              "heap_objects": 2462,
+              "uptime_ms": 29109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:27.371578183Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 720512,
+              "heap_objects": 2488,
+              "uptime_ms": 30109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:28.371623972Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 727304,
+              "heap_objects": 2566,
+              "uptime_ms": 31109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:29.371189071Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 729896,
+              "heap_objects": 2592,
+              "uptime_ms": 32108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:30.371453631Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 736688,
+              "heap_objects": 2670,
+              "uptime_ms": 33109
+            },
+            {
+              "timestamp": "2026-10-08T08:22:31.370816435Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 746760,
+              "heap_objects": 2796,
+              "uptime_ms": 34108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:32.370829447Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 754096,
+              "heap_objects": 2876,
+              "uptime_ms": 35108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:33.370350825Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 756688,
+              "heap_objects": 2902,
+              "uptime_ms": 36108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:34.37072774Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 763832,
+              "heap_objects": 2984,
+              "uptime_ms": 37108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:35.370206166Z",
+              "go_version": "go1.23.12",
+              "goroutines": 5,
+              "heap_alloc_bytes": 766424,
+              "heap_objects": 3010,
+              "uptime_ms": 38107
+            },
+            {
+              "timestamp": "2026-10-08T08:22:36.370454753Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 797672,
+              "heap_objects": 3279,
+              "uptime_ms": 39108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:37.37099946Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 800264,
+              "heap_objects": 3305,
+              "uptime_ms": 40108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:38.370371153Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 807216,
+              "heap_objects": 3384,
+              "uptime_ms": 41108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:39.370861015Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 809808,
+              "heap_objects": 3410,
+              "uptime_ms": 42108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:40.370498349Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 816696,
+              "heap_objects": 3489,
+              "uptime_ms": 43108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:41.370323074Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 819288,
+              "heap_objects": 3515,
+              "uptime_ms": 44107
+            },
+            {
+              "timestamp": "2026-10-08T08:22:42.370988352Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 826080,
+              "heap_objects": 3593,
+              "uptime_ms": 45108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:43.370547485Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 828672,
+              "heap_objects": 3619,
+              "uptime_ms": 46108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:44.370450645Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 839360,
+              "heap_objects": 3744,
+              "uptime_ms": 47108
+            },
+            {
+              "timestamp": "2026-10-08T08:22:45.370897303Z",
+              "go_version": "go1.23.12",
+              "goroutines": 30,
+              "heap_alloc_bytes": 1902400,
+              "heap_objects": 3891,
+              "uptime_ms": 48108
+            }
+          ],
+          "sample_count": 30,
+          "goroutines": {
+            "start": 5,
+            "end": 30,
+            "minimum": 5,
+            "maximum": 30,
+            "absolute_delta": 25,
+            "growth_rate_per_second": 0.862
+          },
+          "heap": {
+            "start_alloc_bytes": 670632,
+            "end_alloc_bytes": 1902400,
+            "delta_alloc_bytes": 1231768,
+            "start_objects": 1942,
+            "end_objects": 3891,
+            "delta_objects": 1949
+          },
+          "capture_window": {
+            "requested_start": "2026-10-08T08:22:16.250333908Z",
+            "actual_start": "2026-10-08T08:22:16.372024546Z",
+            "actual_end": "2026-10-08T08:22:45.370897303Z",
+            "requested_seconds": 30,
+            "actual_seconds": 28.999
+          },
+          "insufficient_history": false,
+          "collection": {
+            "last_attempt": "2026-10-08T08:22:45.370607723Z",
+            "last_success": "2026-10-08T08:22:45.370897303Z",
+            "stored_samples": 47,
+            "capacity": 300
+          }
+        }
+      }
+    ],
+    "confidence": 0.95,
+    "affected_component": "gopilot/internal/demo.LeakController（Inject / waitForever）",
+    "recommendation": "1) 在 gopilot/internal/demo.(*LeakController).waitForever 中引入退出条件：把无缓冲/无信号的永久 channel receive 改为监听 ctx.Done() 或关闭型 quit channel，并在 Inject 侧保存 cancel/close 句柄，确保 goroutine 可被回收。2) 为 LeakController 增加 Stop/Release 接口，在服务关停或泄漏演示结束时统一回收，避免进程生命周期内累积。3) 增加持续监控：对 goroutines（尤其 runtime.NumGoroutine 与其基线差值）和 active_intentional_leak_count 设阈值告警，并把 goroutine pprof 按签名分组比对，及时发现同类不回落增长。4) 复核 heap_alloc_bytes / heap_objects 的增长曲线，确认泄漏路径的分配是否随 goroutine 数量累积。5) 若该泄漏是刻意演示行为，请在部署配置中显式关闭注入，或在文档中标注该 demo 端点不可用于生产环境。",
+    "investigation": [
+      {
+        "sequence": 1,
+        "agent_step": 1,
+        "tool_call_id": "call_00_PGBugIxzrKb7wFfrEhR53699",
+        "tool": "get_service_status",
+        "arguments": {},
+        "status": "success",
+        "observation_id": "obs_1791447765130_000001",
+        "started_at": "2026-10-08T08:22:45.129868383Z",
+        "completed_at": "2026-10-08T08:22:45.130612445Z"
+      },
+      {
+        "sequence": 2,
+        "agent_step": 1,
+        "tool_call_id": "call_01_Q8W6cAPRzV42wnVOaSvZ1836",
+        "tool": "get_runtime_metrics",
+        "arguments": {
+          "window_seconds": 60
+        },
+        "status": "success",
+        "observation_id": "obs_1791447765130_000002",
+        "started_at": "2026-10-08T08:22:45.130665203Z",
+        "completed_at": "2026-10-08T08:22:45.130688312Z"
+      },
+      {
+        "sequence": 3,
+        "agent_step": 1,
+        "tool_call_id": "call_02_4EQDA83HbFzY74k5PaWX0741",
+        "tool": "get_goroutine_profile",
+        "arguments": {
+          "top_n": 15
+        },
+        "status": "success",
+        "observation_id": "obs_1791447765131_000003",
+        "started_at": "2026-10-08T08:22:45.130767556Z",
+        "completed_at": "2026-10-08T08:22:45.131230703Z"
+      },
+      {
+        "sequence": 4,
+        "agent_step": 2,
+        "tool_call_id": "call_00_8QGVph70W7Z8hkbqTeXc9850",
+        "tool": "get_goroutine_profile",
+        "arguments": {
+          "top_n": 10
+        },
+        "status": "success",
+        "observation_id": "obs_1791447766250_000004",
+        "started_at": "2026-10-08T08:22:46.249721633Z",
+        "completed_at": "2026-10-08T08:22:46.250295868Z"
+      },
+      {
+        "sequence": 5,
+        "agent_step": 2,
+        "tool_call_id": "call_01_y55f8PKEjqvACLczOTEl0446",
+        "tool": "get_runtime_metrics",
+        "arguments": {
+          "window_seconds": 30
+        },
+        "status": "success",
+        "observation_id": "obs_1791447766250_000005",
+        "started_at": "2026-10-08T08:22:46.250329355Z",
+        "completed_at": "2026-10-08T08:22:46.250337987Z"
+      },
+      {
+        "sequence": 6,
+        "agent_step": 3,
+        "tool_call_id": "call_00_uyBd18PsJp4xm7OJRlxD5439",
+        "tool": "submit_diagnosis",
+        "arguments": {
+          "summary": "服务 demo-service 当前对外健康（health_status=ok、http_status=200、request_latency_ms 约 0.3ms），但存在一处确定性的 goroutine 泄漏：goroutine 总数从 5 阶跃到 30 并保持不降，pprof 显示其中 25 个 goroutine 全部阻塞在 gopilot/internal/demo.(*LeakController).waitForever，属于刻意注入的泄漏（active_intentional_leak_count=25）。当前尚未造成延迟或可用性劣化，风险在于持续累积。",
+          "root_cause": "gopilot/internal/demo.(*LeakController).Inject 启动了 25 个 goroutine，这些 goroutine 进入 (*LeakController).waitForever 后永久阻塞在 channel receive（state=chan receive），没有任何退出路径，因此无法被回收。证据链一致：get_service_status 报告 current_goroutine_count=30 且 active_intentional_leak_count=25；get_runtime_metrics 显示 goroutines 在约 uptime 38s 处从 5 直接跃迁到 30，start=5、end=30、absolute_delta=25，之后保持平坦不回落；get_goroutine_profile 中签名 3f067bf74dca7430 的 stack group 计数恰好为 25，帧为 [\"gopilot/internal/demo.(*LeakController).waitForever\",\"created by gopilot/internal/demo.(*LeakController).Inject\"]，contains_intentional_leak=true。其余 stack group（pprof 处理、net/http Accept、connReader backgroundRead、os/signal.loop、main.main）各 1 个，属于正常运行时与请求处理活动，20 个 goroutine 的总增量与正常活动无关。此外 heap_alloc_bytes 在同一窗口内从 670632 升至 1902400，其中最后一次采样跳升明显，属于该泄漏路径相关的分配增长而非 goroutine 之外的新问题信号。",
+          "evidence_refs": [
+            "obs_1791447765130_000001",
+            "obs_1791447765130_000002",
+            "obs_1791447765131_000003",
+            "obs_1791447766250_000004",
+            "obs_1791447766250_000005"
+          ],
+          "confidence": 0.95,
+          "affected_component": "gopilot/internal/demo.LeakController（Inject / waitForever）",
+          "recommendation": "1) 在 gopilot/internal/demo.(*LeakController).waitForever 中引入退出条件：把无缓冲/无信号的永久 channel receive 改为监听 ctx.Done() 或关闭型 quit channel，并在 Inject 侧保存 cancel/close 句柄，确保 goroutine 可被回收。2) 为 LeakController 增加 Stop/Release 接口，在服务关停或泄漏演示结束时统一回收，避免进程生命周期内累积。3) 增加持续监控：对 goroutines（尤其 runtime.NumGoroutine 与其基线差值）和 active_intentional_leak_count 设阈值告警，并把 goroutine pprof 按签名分组比对，及时发现同类不回落增长。4) 复核 heap_alloc_bytes / heap_objects 的增长曲线，确认泄漏路径的分配是否随 goroutine 数量累积。5) 若该泄漏是刻意演示行为，请在部署配置中显式关闭注入，或在文档中标注该 demo 端点不可用于生产环境。"
+        },
+        "status": "success",
+        "started_at": "2026-10-08T08:22:50.985745749Z",
+        "completed_at": "2026-10-08T08:22:50.985803111Z"
+      }
+    ]
+  }
+}

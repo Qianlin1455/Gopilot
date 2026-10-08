@@ -11,6 +11,14 @@ import {
 } from './api'
 import { createBaselineState, observeBaseline } from './baseline'
 import { stepStatusLabel, toolDisplayName, zhCN } from './locales/zh-CN'
+import {
+  isLiveDiagnosisRecovered,
+  loadReplayArtifact,
+  ReplayError,
+  selectDiagnosisForMode,
+  type DiagnosisViewMode,
+  type ReplayArtifact,
+} from './replay'
 
 const MAX_POINTS = 60
 const LEAK_BATCH = 25
@@ -67,6 +75,19 @@ function formatUptime(milliseconds?: number) {
 function formatTime(value?: string) {
   if (!value) return '—'
   return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(value))
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -291,6 +312,8 @@ function EvidenceCard({ evidence, index }: { evidence: Evidence; index: number }
 function ErrorNotice({ error }: { error: APIError }) {
   const title = error.code === 'agent_not_configured'
     ? zhCN.errors.agentNotConfigured
+    : error.code === 'replay_load_failed' || error.code === 'invalid_replay' || error.code === 'invalid_replay_json'
+      ? zhCN.errors.replayFailed
     : error.code === 'request_timeout'
       ? zhCN.errors.diagnosisTimedOut
       : error.code === 'backend_unavailable'
@@ -310,6 +333,22 @@ function ErrorNotice({ error }: { error: APIError }) {
   )
 }
 
+function ReplayBanner({ replay }: { replay: ReplayArtifact }) {
+  return (
+    <div className="replay-banner" role="status" aria-atomic="true">
+      <div>
+        <span className="replay-label">{zhCN.replay.badge}</span>
+        <strong>{replay.case_name}</strong>
+        <p>{zhCN.replay.isolationNotice}</p>
+      </div>
+      <dl>
+        <div><dt>{zhCN.replay.recordedAt}</dt><dd>{formatDateTime(replay.recorded_at)}</dd></div>
+        <div><dt>{zhCN.replay.provider}</dt><dd>{replay.provider.name} / {replay.provider.model}</dd></div>
+      </dl>
+    </div>
+  )
+}
+
 function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [gopilotOnline, setGopilotOnline] = useState<boolean | null>(null)
@@ -320,8 +359,12 @@ function App() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [controlBusy, setControlBusy] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
-  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null)
-  const [diagnosisError, setDiagnosisError] = useState<APIError | null>(null)
+  const [liveDiagnosis, setLiveDiagnosis] = useState<Diagnosis | null>(null)
+  const [liveDiagnosisError, setLiveDiagnosisError] = useState<APIError | null>(null)
+  const [viewMode, setViewMode] = useState<DiagnosisViewMode>('live')
+  const [replay, setReplay] = useState<ReplayArtifact | null>(null)
+  const [replayLoading, setReplayLoading] = useState(false)
+  const [replayError, setReplayError] = useState<APIError | null>(null)
 
   const poll = useCallback(async () => {
     const [demoResult, gopilotResult] = await Promise.allSettled([
@@ -383,8 +426,8 @@ function App() {
       setLeakStatus(status)
       setRuntimeError(null)
       if (clearDiagnosis) {
-        setDiagnosis(null)
-        setDiagnosisError(null)
+        setLiveDiagnosis(null)
+        setLiveDiagnosisError(null)
       }
       await poll()
     } catch (error) {
@@ -395,22 +438,42 @@ function App() {
   }
 
   const diagnose = async () => {
+    setViewMode('live')
     setDiagnosing(true)
-    setDiagnosis(null)
-    setDiagnosisError(null)
+    setLiveDiagnosis(null)
+    setLiveDiagnosisError(null)
     try {
-      setDiagnosis(await api.diagnose())
+      setLiveDiagnosis(await api.diagnose())
     } catch (error) {
-      setDiagnosisError(error instanceof APIError ? error : new APIError(zhCN.errors.diagnosisUnexpected, 'unknown_error'))
+      setLiveDiagnosisError(error instanceof APIError ? error : new APIError(zhCN.errors.diagnosisUnexpected, 'unknown_error'))
     } finally {
       setDiagnosing(false)
+    }
+  }
+
+  const showReplay = async () => {
+    setViewMode('historical')
+    setReplayError(null)
+    if (replay) return
+    setReplayLoading(true)
+    try {
+      setReplay(await loadReplayArtifact())
+    } catch (error) {
+      const replayFailure = error instanceof ReplayError
+        ? new APIError(error.message, error.code)
+        : new APIError(zhCN.errors.replayUnexpected, 'replay_load_failed')
+      setReplayError(replayFailure)
+    } finally {
+      setReplayLoading(false)
     }
   }
 
   const current = samples.at(-1)
   const baselineGoroutines = baseline.value
   const currentDelta = current && baselineGoroutines !== null ? current.goroutines - baselineGoroutines : undefined
-  const recovered = Boolean(diagnosis && leakStatus?.active === 0)
+  const diagnosis = selectDiagnosisForMode(viewMode, liveDiagnosis, replay)
+  const activeDiagnosisError = viewMode === 'live' ? liveDiagnosisError : replayError
+  const recovered = isLiveDiagnosisRecovered(viewMode, liveDiagnosis, leakStatus?.active)
 
   return (
     <>
@@ -441,11 +504,17 @@ function App() {
           </li>
           <li className={diagnosing || diagnosis ? 'is-active' : ''}>
             <span>{zhCN.workflow.investigation}</span>
-            <strong>{diagnosing ? zhCN.workflow.providerActive : diagnosis ? zhCN.workflow.ledgerSteps(diagnosis.investigation.length) : zhCN.workflow.ready}</strong>
+            <strong>{diagnosing
+              ? zhCN.workflow.providerActive
+              : diagnosis
+                ? viewMode === 'historical' ? zhCN.workflow.replaySteps(diagnosis.investigation.length) : zhCN.workflow.ledgerSteps(diagnosis.investigation.length)
+                : zhCN.workflow.ready}</strong>
           </li>
           <li className={diagnosis ? 'is-active' : ''}>
             <span>{zhCN.workflow.diagnosis}</span>
-            <strong>{diagnosis ? zhCN.workflow.observationsLinked(diagnosis.evidence.length) : zhCN.workflow.awaitingEvidence}</strong>
+            <strong>{diagnosis
+              ? viewMode === 'historical' ? zhCN.workflow.replayObservations(diagnosis.evidence.length) : zhCN.workflow.observationsLinked(diagnosis.evidence.length)
+              : zhCN.workflow.awaitingEvidence}</strong>
           </li>
         </ol>
       </header>
@@ -518,11 +587,36 @@ function App() {
           title={zhCN.investigation.title}
           description={zhCN.investigation.description}
           action={(
-            <button className="button button-primary" disabled={diagnosing || gopilotOnline !== true} onClick={() => void diagnose()}>
-              {diagnosing ? <><span className="spinner" aria-hidden="true" /> {zhCN.investigation.diagnosing}</> : <>{zhCN.investigation.diagnose}</>}
-            </button>
+            viewMode === 'live'
+              ? <button className="button button-primary" disabled={diagnosing || gopilotOnline !== true} onClick={() => void diagnose()}>
+                  {diagnosing ? <><span className="spinner" aria-hidden="true" /> {zhCN.investigation.diagnosing}</> : <>{zhCN.investigation.diagnose}</>}
+                </button>
+              : <span className="mode-indicator">{zhCN.replay.badge}</span>
           )}
         />
+
+        <div className="diagnosis-mode-switch" role="group" aria-label={zhCN.replay.modeSelector}>
+          <button
+            className={`mode-option ${viewMode === 'live' ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={viewMode === 'live'}
+            disabled={diagnosing}
+            onClick={() => setViewMode('live')}
+          >
+            <strong>{zhCN.replay.liveTitle}</strong>
+            <span>{zhCN.replay.liveDescription}</span>
+          </button>
+          <button
+            className={`mode-option ${viewMode === 'historical' ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={viewMode === 'historical'}
+            disabled={diagnosing || replayLoading}
+            onClick={() => void showReplay()}
+          >
+            <strong>{replayLoading ? zhCN.replay.loading : zhCN.replay.historyTitle}</strong>
+            <span>{zhCN.replay.historyDescription}</span>
+          </button>
+        </div>
 
         {diagnosing && (
           <div className="investigating-state" role="status" aria-live="polite">
@@ -533,17 +627,27 @@ function App() {
             </div>
           </div>
         )}
-        {!diagnosing && diagnosisError && <ErrorNotice error={diagnosisError} />}
-        {!diagnosing && !diagnosis && !diagnosisError && (
-          <div className="empty-state investigation-empty">
-            <div className="empty-index" aria-hidden="true">02</div>
-            <div><strong>{zhCN.investigation.emptyTitle}</strong><p>{zhCN.investigation.emptyDescription}</p></div>
+        {viewMode === 'historical' && replayLoading && (
+          <div className="investigating-state" role="status" aria-live="polite">
+            <div className="pending-mark" aria-hidden="true"><span /></div>
+            <div><strong>{zhCN.replay.loading}</strong><p>{zhCN.replay.loadingDescription}</p></div>
           </div>
         )}
-        {diagnosis && (
+        {!diagnosing && !replayLoading && activeDiagnosisError && <ErrorNotice error={activeDiagnosisError} />}
+        {!diagnosing && !replayLoading && !diagnosis && !activeDiagnosisError && (
+          <div className="empty-state investigation-empty">
+            <div className="empty-index" aria-hidden="true">02</div>
+            <div>
+              <strong>{viewMode === 'historical' ? zhCN.replay.emptyTitle : zhCN.investigation.emptyTitle}</strong>
+              <p>{viewMode === 'historical' ? zhCN.replay.emptyDescription : zhCN.investigation.emptyDescription}</p>
+            </div>
+          </div>
+        )}
+        {viewMode === 'historical' && replay && <ReplayBanner replay={replay} />}
+        {!diagnosing && !replayLoading && diagnosis && (
           <div className="investigation-result">
             <div className="result-heading">
-              <div><span>{zhCN.investigation.ledger}</span><code>{diagnosis.investigation_id}</code></div>
+              <div><span>{viewMode === 'historical' ? zhCN.replay.historicalLedger : zhCN.investigation.ledger}</span><code>{diagnosis.investigation_id}</code></div>
               <div>{zhCN.investigation.completed(diagnosis.investigation.length, formatTime(diagnosis.generated_at))}</div>
             </div>
             <Timeline steps={diagnosis.investigation} />
@@ -571,7 +675,7 @@ function App() {
             {recovered && <div className="recovery-banner" role="status"><span aria-hidden="true">✓</span><div><strong>{zhCN.diagnosis.recoveryConfirmed}</strong><p>{zhCN.diagnosis.recoveryDescription}</p></div></div>}
             <div className="diagnosis-grid">
               <article className="diagnosis-main">
-                <div className="diagnosis-kicker"><span>{zhCN.diagnosis.conclusion}</span><code>{diagnosis.id}</code></div>
+                <div className="diagnosis-kicker"><span>{viewMode === 'historical' ? zhCN.replay.historicalConclusion : zhCN.diagnosis.conclusion}</span><code>{diagnosis.id}</code></div>
                 <h3>{diagnosis.summary}</h3>
                 <div className="diagnosis-block">
                   <span>{zhCN.diagnosis.rootCause}</span>
@@ -596,7 +700,7 @@ function App() {
 
             <div className="evidence-heading">
               <div><span>{zhCN.diagnosis.evidenceBundle}</span><strong>{zhCN.diagnosis.observations(diagnosis.evidence.length)}</strong></div>
-              <p>{zhCN.diagnosis.evidenceHint}</p>
+              <p>{viewMode === 'historical' ? zhCN.replay.evidenceHint : zhCN.diagnosis.evidenceHint}</p>
             </div>
             {diagnosis.evidence.length ? (
               <div className="evidence-list">

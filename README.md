@@ -11,6 +11,7 @@ GoPilot 是一个面向 Go Runtime 的证据驱动智能诊断演示。它通过
 - 解析并聚合真实 `/debug/pprof/goroutine?debug=2` 堆栈
 - 有最大步数限制的 OpenAI-compatible Tool Calling Agent
 - 服务端拥有的调查时间线和 observation_id 证据校验
+- 无需 API Key 的真实 DeepSeek 历史诊断回放
 - 专业中文诊断控制台，包含趋势、调查过程、根因与证据
 - 三服务 Docker Compose 一键部署，浏览器仅访问同源入口
 
@@ -67,6 +68,23 @@ docker compose down
 
 Compose 会自动读取仓库根目录的 `.env`，该文件已被 Git 忽略。请勿提交真实 API Key。
 
+## 无 API Key 体验方式
+
+不创建 `.env`，或让 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 保持为空，然后正常启动：
+
+```bash
+docker compose up -d --build
+```
+
+打开 Dashboard 后仍可完整体验实时 Runtime 采样、健康基线、注入 25 个泄漏和重置。进入“AI 智能诊断”区域时有两个明确模式：
+
+- **实时 AI 诊断**：调用 DeepSeek 分析当前运行时，需要有效 API Key；未配置时会明确显示 `agent_not_configured`。
+- **查看历史诊断**：从 `/replays/goroutine-leak.json` 读取此前真实 DeepSeek 调用形成的完整记录，不访问模型服务，也不需要 API Key。
+
+历史回放包含原始调查顺序、Tool 参数、服务器生成的 observation_id、真实 Metrics 和 pprof 分组、根因及建议。页面会持续把它标记为“历史真实诊断回放”；历史指标不会覆盖当前 Runtime，历史 observation 也不会进入当前 Agent Ledger。当前服务的 Inject 或 Reset 操作不会修改静态案例。
+
+案例来源、录制过程、校验结果和文件摘要见 [docs/replay-provenance.md](docs/replay-provenance.md)。若希望运行自己的实时诊断，请按上一节配置 DeepSeek 凭据并重建或重新创建 `gopilot` 容器。
+
 ## 竞赛演示流程
 
 1. 打开 Dashboard，等待“服务在线”和观测基线建立。
@@ -76,6 +94,8 @@ Compose 会自动读取仓库根目录的 `.env`，该文件已被 Git 忽略。
 5. 展开诊断过程与证据，确认 `get_service_status`、`get_runtime_metrics`、`get_goroutine_profile` 的 observation_id 与最终引用一致。
 6. 确认根因指向 `LeakController.waitForever`，再点击“重置演示”。
 7. 等待活动泄漏回到 0、Goroutine 数量恢复并重新建立可信基线。
+
+无 API Key 的现场演示可在第 4 步改为点击“查看历史诊断”。此时上方仍显示当前服务的实时数据，下方明确展示过去独立调查的时间线和证据。
 
 完整讲解词见 [docs/demo-script.md](docs/demo-script.md)。
 
@@ -185,4 +205,5 @@ docker compose logs --no-color
 - 当前演示仅覆盖单个 Go 服务的 Goroutine 泄漏场景。
 - 指标和调查数据存于进程内存，容器重启后不会持久化。
 - Agent 使用非流式诊断协议，页面在完整结果返回后展示调查时间线。
+- 历史回放是一个经过校验的静态真实案例，不是调查数据库，也不会随当前服务状态更新。
 - 不包含身份认证、租户隔离或公网生产安全加固；宿主机端口默认只绑定本地回环地址。
