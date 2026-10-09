@@ -1,0 +1,63 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontFamily: "Inter, Microsoft YaHei, sans-serif"
+    primaryColor: "#172033"
+    primaryTextColor: "#eef2f7"
+    primaryBorderColor: "#5d7396"
+    lineColor: "#64748b"
+    clusterBkg: "#f5f7fa"
+    clusterBorder: "#aab5c4"
+    fontSize: "16px"
+  flowchart:
+    curve: basis
+    nodeSpacing: 36
+    rankSpacing: 46
+---
+flowchart LR
+    subgraph SOURCE["真实数据源"]
+        R["Go runtime<br/>Goroutine / Heap / Uptime"]
+        P["pprof goroutine<br/>真实堆栈"]
+    end
+
+    C["Collector<br/>采样、限流、解析与分组"]
+    T["Evidence Tools<br/>参数校验 + 结构化结果"]
+    O["Observation Envelope<br/>obs_... 由 GoPilot 生成"]
+
+    subgraph INV["当前 Investigation：inv_..."]
+        L["服务端 Ledger<br/>仅保存成功 Observation"]
+        REF["模型提交 evidence_refs<br/>只能提供 ID"]
+        V{"服务端引用校验"}
+        L --> V
+        REF --> V
+    end
+
+    OK["服务端物化<br/>Diagnosis.Evidence"]
+    BAD["拒绝 submit_diagnosis<br/>返回 invalid_diagnosis"]
+    D["最终 Diagnosis<br/>证据 + 根因 + 时间线"]
+    OTHER["其他 Investigation<br/>inv_other 的 Observation"]
+
+    R --> C
+    P --> C
+    C --> T --> O --> L
+    O -. "Tool Result 返回模型" .-> REF
+    V -->|"存在、成功、属于 inv_..."| OK --> D
+    V -->|"未知 / 重复 / 跨调查"| BAD
+    OTHER -. "不可引用" .-> V
+
+    NOTE["核心约束<br/>模型不创建 Observation ID<br/>模型不编写最终 Evidence<br/>无效引用不能进入 Diagnosis"]
+    NOTE -.-> V
+
+    classDef source fill:#eef2f7,stroke:#7a879a,color:#1d2939,stroke-width:1.5px;
+    classDef core fill:#172033,stroke:#5d7396,color:#eef2f7,stroke-width:1.5px;
+    classDef ledger fill:#12382f,stroke:#2f8f72,color:#ecfdf5,stroke-width:2px;
+    classDef verify fill:#173c5b,stroke:#4b91c2,color:#ffffff,stroke-width:2px;
+    classDef reject fill:#4a2020,stroke:#b85c5c,color:#fff1f1,stroke-width:1.5px;
+    classDef note fill:#3a2b12,stroke:#b78632,color:#fff7df,stroke-width:1.5px;
+    class R,P,OTHER source;
+    class C,T,O core;
+    class L,REF,OK,D ledger;
+    class V verify;
+    class BAD reject;
+    class NOTE note;

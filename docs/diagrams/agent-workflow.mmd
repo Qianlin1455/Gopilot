@@ -1,0 +1,61 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontFamily: "Inter, Microsoft YaHei, sans-serif"
+    primaryColor: "#172033"
+    primaryTextColor: "#1d2939"
+    primaryBorderColor: "#60708a"
+    lineColor: "#5e6c84"
+    actorBkg: "#172033"
+    actorBorder: "#5d7396"
+    actorTextColor: "#ffffff"
+    signalColor: "#344054"
+    signalTextColor: "#1d2939"
+    noteBkgColor: "#fff7df"
+    noteBorderColor: "#b78632"
+    noteTextColor: "#4b3710"
+---
+sequenceDiagram
+    autonumber
+    actor U as 评委
+    participant D as Dashboard / Nginx
+    participant G as GoPilot Runtime
+    participant L as Investigation Ledger
+    participant M as DeepSeek API
+    participant T as Evidence Tools
+    participant C as Collector
+    participant S as demo-service
+
+    U->>D: 点击“开始诊断”
+    D->>G: POST /api/diagnoses
+    G->>L: 创建 inv_... Investigation
+    G->>M: Chat Completions<br/>tools + tool_choice: required
+    M-->>G: assistant.tool_calls
+
+    loop 最多 8 个模型步骤，可包含多个 Tool Call
+        G->>G: 校验 Tool 名称与 JSON 参数
+        G->>T: 执行 get_service_status / metrics / profile
+        T->>C: 请求真实证据
+        C->>S: health / runtime / leak status / pprof
+        S-->>C: 当前服务观测
+        C-->>T: 有界、规范化数据
+        T-->>G: Observation Envelope（obs_...）
+        G->>L: 记录步骤并保存成功 Observation
+        G->>M: role=tool + 原 tool_call_id + Envelope
+        M-->>G: 下一组 Tool Calls
+    end
+
+    M-->>G: submit_diagnosis(evidence_refs)
+    G->>L: 校验引用属于当前 Investigation
+    alt 引用有效
+        G->>L: 从 Observation 物化 Diagnosis.Evidence
+        G->>G: 生成 Diagnosis + 服务端时间线
+        G-->>D: 200 完整结构化 Diagnosis
+        D-->>U: 展示调查轨迹、根因与真实证据
+    else 引用无效或跨 Investigation
+        G->>L: 记录失败步骤
+        G->>M: 返回 invalid_diagnosis Tool Result
+    end
+
+    Note over M,S: 模型只请求 Tool Call；本地 Tool 始终由 GoPilot 执行

@@ -1,0 +1,72 @@
+---
+config:
+  theme: base
+  themeVariables:
+    fontFamily: "Inter, Microsoft YaHei, sans-serif"
+    primaryColor: "#172033"
+    primaryTextColor: "#eef2f7"
+    primaryBorderColor: "#5d7396"
+    lineColor: "#718096"
+    secondaryColor: "#111827"
+    tertiaryColor: "#f4f7fb"
+    clusterBkg: "#f4f7fb"
+    clusterBorder: "#b8c2d1"
+    fontSize: "16px"
+  flowchart:
+    curve: basis
+    nodeSpacing: 38
+    rankSpacing: 48
+---
+flowchart LR
+    U["评委浏览器<br/>localhost:3000"]
+    LLM["DeepSeek API<br/>OpenAI-compatible"]
+
+    subgraph NET["Docker Compose 网络"]
+        direction LR
+        subgraph WEB["web 容器"]
+            direction TB
+            N["Nginx<br/>静态 Dashboard + 同源代理"]
+            R["历史回放 JSON<br/>只读；不调用模型<br/>不写当前 Ledger"]
+            N -->|"/replays/*"| R
+        end
+
+        subgraph GP["gopilot 容器 :8080"]
+            direction TB
+            A["Agent Runtime<br/>最多 8 个模型步骤"]
+            T["Evidence Tools<br/>参数校验与规范化"]
+            C["Collector<br/>1 秒采样 / pprof 解析"]
+            LED["Investigation Ledger<br/>Observation + 时间线"]
+            A --> T
+            T --> C
+            T --> LED
+        end
+
+        subgraph DEMO["demo-service 容器 :8081"]
+            direction TB
+            S["Go HTTP 服务"]
+            RM["runtime 指标"]
+            PP["net/http/pprof"]
+            LK["受控 LeakController"]
+            S --> RM
+            S --> PP
+            S --> LK
+        end
+
+        N -->|"/gopilot/*"| A
+        N -->|"/demo/*"| S
+        C -->|"内部证据采集"| S
+    end
+
+    U -->|"127.0.0.1:3000"| N
+    A <-->|"Chat Completions<br/>Tool Calls"| LLM
+
+    classDef external fill:#eef2f7,stroke:#75839a,color:#1d2939,stroke-width:1.5px;
+    classDef gateway fill:#16324f,stroke:#2d6a94,color:#ffffff,stroke-width:2px;
+    classDef core fill:#172033,stroke:#5d7396,color:#eef2f7,stroke-width:1.5px;
+    classDef evidence fill:#12382f,stroke:#2f8f72,color:#ecfdf5,stroke-width:1.5px;
+    classDef replay fill:#3a2b12,stroke:#b78632,color:#fff7df,stroke-width:1.5px;
+    class U,LLM external;
+    class N gateway;
+    class A,T,C,S,RM,PP,LK core;
+    class LED evidence;
+    class R replay;

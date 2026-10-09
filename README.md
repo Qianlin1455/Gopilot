@@ -4,6 +4,12 @@ GoPilot 是一个面向 Go Runtime 的证据驱动智能诊断演示。它通过
 
 当前竞赛演示聚焦一个完整场景：注入可控的 Goroutine 泄漏，观察数量趋势，运行 AI 调查，查看带证据引用的结构化诊断，最后重置并确认服务恢复。
 
+## 评委快速体验
+
+- [3 分钟评委使用指南](docs/judge-guide.md)：无 API Key 也能完成故障注入、指标观察和真实历史诊断回放。
+- [技术架构文档](docs/architecture.md)：组件职责、Agent Tool Calling、Evidence Grounding 与安全边界。
+- [系统总体架构图](docs/diagrams/system-architecture.svg)：适合 GitHub 浏览、比赛答辩与演示讲解。
+
 ## 核心能力
 
 - 可重复、数量有界且可重置的 Goroutine 泄漏演示
